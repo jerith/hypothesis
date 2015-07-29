@@ -386,19 +386,6 @@ class SearchStrategy(object):
         return iter(())
 
 
-class lazy(object):
-
-    def __init__(self, evaluate):
-        self.evaluate = evaluate
-
-    @property
-    def value(self):
-        if self.evaluate is not None:
-            self.__value = self.evaluate()
-            self.evaluate = None
-        return self.__value
-
-
 class LazyParameter(object):
 
     def __init__(self, strategy, random):
