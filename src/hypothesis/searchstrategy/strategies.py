@@ -403,6 +403,7 @@ class LazyParameter(object):
     @property
     def value(self):
         if not self.evaluated:
+            self.evaluated = True
             self.__value = self.strategy.draw_parameter(self.random)
         return self.__value
 
