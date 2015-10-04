@@ -381,6 +381,7 @@ def given(*generator_arguments, **generator_kwargs):
     # if they were keyword specifiers for data to pass to the test.
     provided_random = generator_kwargs.pop(u'random', None)
     settings = generator_kwargs.pop(u'settings', None) or Settings.default
+    driver = generator_kwargs.pop(u'driver', None) or sync_driver
 
     if (provided_random is not None) and settings.derandomize:
         raise InvalidArgument(
@@ -461,7 +462,7 @@ def given(*generator_arguments, **generator_kwargs):
         @copy_argspec(
             test.__name__, argspec
         )
-        @with_driver(sync_driver)
+        @with_driver(driver)
         def wrapped_test(*arguments, **kwargs):
             selfy = None
             arguments, kwargs = convert_positional_arguments(
@@ -648,10 +649,6 @@ def sync_driver(g):
         raise result[1][0], result[1][1], result[1][2]
 
 
-def find(*a, **kw):
-    return sync_driver(find_task(*a, **kw))
-
-
 def find_task(specifier, condition, settings=None, random=None, storage=None):
     settings = settings or Settings(
         max_examples=2000,
@@ -714,6 +711,12 @@ def find_task(specifier, condition, settings=None, random=None, storage=None):
                 search.template_upper_bound,
             )
         raise NoSuchExample(get_pretty_function_description(condition))
+
+
+def find(specifier, condition, settings=None, random=None, storage=None, driver=None):
+    if driver is None:
+        driver = sync_driver
+    return driver(find_task(specifier, condition, settings=settings, random=random))
 
 
 load_entry_points()
