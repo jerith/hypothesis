@@ -24,7 +24,9 @@ import time
 import inspect
 import binascii
 import functools
+import sys
 import traceback
+import types
 from random import Random
 from itertools import islice
 from collections import namedtuple
@@ -100,8 +102,8 @@ def find_satisfying_template(
                 break
             tracker.track(example)
             try:
-                if condition(example):
-                    return example
+                if (yield condition(example)):
+                    return_value(example)
                 satisfying_examples += 1
             except UnsatisfiedAssumption:
                 pass
@@ -143,8 +145,8 @@ def find_satisfying_template(
             parameter_source.mark_bad()
             continue
         try:
-            if condition(example):
-                return example
+            if (yield condition(example)):
+                return_value(example)
         except UnsatisfiedAssumption:
             parameter_source.mark_bad()
             continue
@@ -198,7 +200,6 @@ def simplify_template_such_that(
     """
     assert isinstance(random, Random)
 
-    yield t
     successful_shrinks = 0
 
     changed = True
@@ -231,7 +232,7 @@ def simplify_template_such_that(
                 for s in simpler:
                     any_shrinks = True
                     if time_to_call_it_a_day(settings, start_time):
-                        return
+                        return_value(t)
                     if tracker.track(s) > 1:
                         debug_report(
                             u'Skipping simplifying to duplicate %s' % (
@@ -239,14 +240,11 @@ def simplify_template_such_that(
                             ))
                         continue
                     try:
-                        if f(s):
+                        if (yield f(s)):
                             successful_shrinks += 1
                             changed = True
-                            yield s
                             t = s
                             break
-                        else:
-                            yield t
                     except UnsatisfiedAssumption:
                         pass
                 else:
@@ -260,6 +258,15 @@ def simplify_template_such_that(
                 unicode_safe_repr(t),
             ))
             break
+    if not successful_shrinks:
+        verbose_report(u'Could not shrink example')
+    elif successful_shrinks == 1:
+        verbose_report(u'Successfully shrunk example once')
+    else:
+        verbose_report(
+            u'Successfully shrunk example %d times' % (
+                successful_shrinks,))
+    return_value(t)
 
 
 def best_satisfying_template(
@@ -279,27 +286,17 @@ def best_satisfying_template(
 
     successful_shrinks = -1
     with settings:
-        satisfying_example = find_satisfying_template(
+        satisfying_example = yield find_satisfying_template(
             search_strategy, random, condition, tracker, settings, storage,
             max_parameter_tries=max_parameter_tries,
         )
-        for simpler in simplify_template_such_that(
+        satisfying_example = yield simplify_template_such_that(
             search_strategy, random, satisfying_example, condition, tracker,
             settings, start_time,
-        ):
-            successful_shrinks += 1
-            satisfying_example = simpler
+        )
         if storage is not None:
             storage.save(satisfying_example, search_strategy)
-        if not successful_shrinks:
-            verbose_report(u'Could not shrink example')
-        elif successful_shrinks == 1:
-            verbose_report(u'Successfully shrunk example once')
-        else:
-            verbose_report(
-                u'Successfully shrunk example %d times' % (
-                    successful_shrinks,))
-        return satisfying_example
+        return_value(satisfying_example)
 
 
 def test_is_flaky(test, expected_repr):
@@ -464,6 +461,7 @@ def given(*generator_arguments, **generator_kwargs):
         @copy_argspec(
             test.__name__, argspec
         )
+        @with_driver(sync_driver)
         def wrapped_test(*arguments, **kwargs):
             selfy = None
             arguments, kwargs = convert_positional_arguments(
@@ -504,7 +502,7 @@ def given(*generator_arguments, **generator_kwargs):
                     test.__name__, arg_string(test, arguments, example_kwargs)
                 )
                 try:
-                    test_runner(
+                    yield test_runner(
                         lambda: test(*arguments, **example_kwargs)
                     )
                 except BaseException:
@@ -518,8 +516,8 @@ def given(*generator_arguments, **generator_kwargs):
             ):
                 # All arguments have been satisfied without needing to invoke
                 # hypothesis
-                test_runner(lambda: test(*arguments, **kwargs))
-                return
+                result = yield test_runner(lambda: test(*arguments, **kwargs))
+                return_value(result)
 
             def convert_to_specifier(v):
                 if isinstance(v, HypothesisProvided):
@@ -547,12 +545,12 @@ def given(*generator_arguments, **generator_kwargs):
             def is_template_example(xs):
                 record_repr = [None]
                 try:
-                    test_runner(reify_and_execute(
+                    yield test_runner(reify_and_execute(
                         search_strategy, xs, test,
                         always_print=settings.max_shrinks <= 0,
                         record_repr=record_repr,
                     ))
-                    return False
+                    return_value(False)
                 except UnsatisfiedAssumption as e:
                     raise e
                 except Exception as e:
@@ -561,14 +559,14 @@ def given(*generator_arguments, **generator_kwargs):
                     last_exception[0] = traceback.format_exc()
                     repr_for_last_exception[0] = record_repr[0]
                     verbose_report(last_exception[0])
-                    return True
+                    return_value(True)
 
             is_template_example.__name__ = test.__name__
             is_template_example.__qualname__ = qualname(test)
 
             falsifying_template = None
             try:
-                falsifying_template = best_satisfying_template(
+                falsifying_template = yield best_satisfying_template(
                     search_strategy, random, is_template_example,
                     settings, storage
                 )
@@ -578,7 +576,7 @@ def given(*generator_arguments, **generator_kwargs):
             assert last_exception[0] is not None
 
             with settings:
-                test_runner(reify_and_execute(
+                yield test_runner(reify_and_execute(
                     search_strategy, falsifying_template, test,
                     print_example=True
                 ))
@@ -588,7 +586,7 @@ def given(*generator_arguments, **generator_kwargs):
                     last_exception[0],
                 )
 
-                test_runner(reify_and_execute(
+                yield test_runner(reify_and_execute(
                     search_strategy, falsifying_template,
                     test_is_flaky(test, repr_for_last_exception[0]),
                     print_example=True
@@ -604,7 +602,57 @@ def given(*generator_arguments, **generator_kwargs):
     return run_test_with_generator
 
 
-def find(specifier, condition, settings=None, random=None, storage=None):
+class Return(BaseException):
+    def __init__(self, value):
+        self.value = value
+
+
+def return_value(v):
+    raise Return(v)
+
+
+def with_driver(driver):
+    def decorator(f):
+        @functools.wraps(f)
+        def wrapped(*a, **kw):
+            return driver(f(*a, **kw))
+        return wrapped
+    return decorator
+
+
+
+def sync_driver(g):
+    if not isinstance(g, types.GeneratorType):
+        return g
+    result = (True, None)
+    while True:
+        try:
+            if result[0]:
+                result = (True, g.send(result[1]))
+            else:
+                result = (True, g.throw(*result[1]))
+        except Return as e:
+            result = (True, e.value)
+            break
+        except StopIteration:
+            result = (True, None)
+            break
+        else:
+            try:
+                result = (True, sync_driver(result[1]))
+            except BaseException:
+                result = (False, sys.exc_info())
+    if result[0]:
+        return result[1]
+    else:
+        raise result[1][0], result[1][1], result[1][2]
+
+
+def find(*a, **kw):
+    return sync_driver(find_task(*a, **kw))
+
+
+def find_task(specifier, condition, settings=None, random=None, storage=None):
     settings = settings or Settings(
         max_examples=2000,
         min_satisfying_examples=0,
@@ -626,7 +674,7 @@ def find(specifier, condition, settings=None, random=None, storage=None):
     def template_condition(template):
         with BuildContext():
             result = search.reify(template)
-            success = condition(result)
+            success = yield condition(result)
 
         if success:
             successful_examples[0] += 1
@@ -644,19 +692,19 @@ def find(specifier, condition, settings=None, random=None, storage=None):
                 verbose_report(lambda: u'Shrunk example to %s' % (
                     repr(result),
                 ))
-        return success
+        return_value(success)
 
     template_condition.__name__ = condition.__name__
     tracker = Tracker()
 
     try:
-        template = best_satisfying_template(
+        template = yield best_satisfying_template(
             search, random, template_condition, settings,
             tracker=tracker, max_parameter_tries=2,
             storage=storage,
         )
         with BuildContext():
-            return search.reify(template)
+            return_value(search.reify(template))
     except Timeout:
         raise
     except NoSuchExample:

@@ -23,6 +23,7 @@ import hypothesis.strategies as s
 from hypothesis import find, given, assume, Settings
 from hypothesis.errors import NoSuchExample, Unsatisfiable
 from hypothesis.internal.tracker import Tracker
+from hypothesis.core import sync_driver, return_value
 
 
 def test_stops_after_max_examples_if_satisfying():
@@ -91,3 +92,20 @@ def test_settings_are_default_in_find():
     find(
         s.booleans(), lambda x: Settings.default is some_normal_settings,
         settings=some_normal_settings)
+
+
+def test_simple_driver():
+    def simple_task():
+        yield return_value(42)
+    assert sync_driver(simple_task()) == 42
+
+
+def test_chained_driver():
+    def simple_task():
+        yield return_value(42)
+    def chained_task():
+        yield simple_task()
+    def chained_task2():
+        assert (yield simple_task()) == 42
+        yield return_value(56)
+    assert sync_driver(chained_task2()) == 56

@@ -274,12 +274,12 @@ def test_removing_an_element_from_a_non_unique_list(xs, y):
 
 
 def test_errors_even_if_does_not_error_on_final_call():
+    seen = [False]
     @given(integers())
     def rude(x):
-        assert not any(
-            t[3] == u'best_satisfying_template'
-            for t in inspect.getouterframes(inspect.currentframe())
-        )
+        f = seen[0]
+        seen[0] = True
+        assert f
 
     with raises(Flaky):
         rude()
@@ -294,12 +294,12 @@ class DifferentReprEachTime(object):
 
 
 def test_reports_repr_diff_in_flaky_error():
+    seen = [False]
     @given(builds(DifferentReprEachTime))
     def rude(x):
-        assert not any(
-            t[3] == u'best_satisfying_template'
-            for t in inspect.getouterframes(inspect.currentframe())
-        )
+        f = seen[0]
+        seen[0] = True
+        assert f
 
     with raises(Flaky) as e:
         rude()
@@ -353,7 +353,8 @@ def test_does_not_print_on_success():
             test_is_an_int()
     out = out.getvalue()
     lines = [l.strip() for l in out.split(u'\n')]
-    assert all(not l for l in lines)
+    for l in lines:
+        assert not l
 
 
 @given(sampled_from([1]))
