@@ -215,3 +215,10 @@ else:
 
 importlib_invalidate_caches = getattr(
     importlib, u'invalidate_caches', lambda: ())
+
+
+if PY3:
+    def raise_with_tb(e, v, t):
+        raise e.with_traceback(t)
+else:
+    from ._compat_py2_syntax import raise_with_tb

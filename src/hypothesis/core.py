@@ -44,7 +44,7 @@ from hypothesis.reporting import report, debug_report, verbose_report, \
     current_verbosity
 from hypothesis.deprecation import note_deprecation
 from hypothesis.internal.compat import qualname, getargspec, \
-    unicode_safe_repr
+    raise_with_tb, unicode_safe_repr
 from hypothesis.internal.tracker import Tracker
 from hypothesis.internal.reflection import arg_string, copy_argspec, \
     function_digest, fully_qualified_name, convert_positional_arguments, \
@@ -646,7 +646,7 @@ def sync_driver(g):
     if result[0]:
         return result[1]
     else:
-        raise result[1][0], result[1][1], result[1][2]
+        raise_with_tb(result[1][0], result[1][1], result[1][2])
 
 
 def find_task(specifier, condition, settings=None, random=None, storage=None):
